@@ -7,7 +7,6 @@ model2 = r"models/v2-yolov8m-50-epochs-normal_database/best.pt" #slowest
 model3 = r"models/v3-yolov8n-50-epochs-normal_database/best.pt" #best for normal database
 model4 = r"models/v4-yolov8n-10-epochs-normal_database/best.pt"
 model5 = r"models/v5_yolov8n-50-epoches-new_database/best.pt"
-
 model = YOLO(model5)
 
 video = r"sources/road_traffic.mp4"
