@@ -3,23 +3,24 @@ from ultralytics import YOLO
 import cv2
 
 model1 = r"models/v1-yolov8s-25-epochs-weak_dataset/best.pt"
-model2 = r"models/v2-yolov8m-50-epochs/best.pt"
-model3 = r"models/v3-yolov8n-50-epochs/best.pt"
-model4 = r"models/v4-yolov8n-10-epochs/best.pt"
+model2 = r"models/v2-yolov8m-50-epochs-normal_database/best.pt" #slowest
+model3 = r"models/v3-yolov8n-50-epochs-normal_database/best.pt" #best for normal database
+model4 = r"models/v4-yolov8n-10-epochs-normal_database/best.pt"
+model5 = r"models/v5_yolov8n-50-epoches-new_database/best.pt"
 
-model = YOLO(model3)
+model = YOLO(model5)
 
-video = r"sources/movingCars.mp4"
+video = r"sources/road_traffic.mp4"
 
 cap = cv2.VideoCapture(video)
 cv2.namedWindow("Traffic Detection",cv2.WINDOW_FULLSCREEN)
 
-target_classes = ['auto rickshaw', 'bus', 'car', 'motorbike', 'truck']
+target_classes = ['bus', 'car', 'motorbike','motorcycle', 'truck']
 
 def classify_density(total):
     if total < 6:
         return "Low", (0, 255, 0)
-    elif total < 30:
+    elif total < 15:
         return "Medium", (0, 255, 255)
     else:
         return "High", (0, 0, 255)
@@ -58,11 +59,3 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
-
-"""
-auto rickshaw
-bus
-car
-motorbike
-truck
-"""
