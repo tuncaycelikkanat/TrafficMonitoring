@@ -7,10 +7,10 @@ from collections import deque
 from datetime import datetime
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QTimer
-from PyQt5.QtGui import QIcon
 from ultralytics import YOLO
 from ui import TrafficUI
 from plot import DensityPlotCanvas
+from database_manager import DatabaseManager
 
 # Define relative paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,9 +33,14 @@ class TrafficApp:
         self.app = QApplication(sys.argv)
         self.ui = TrafficUI()
         self.cap = None
-        self.log_file = None
+        self.db_manager = DatabaseManager()
+
         self.timer = QTimer()
         self.timer.timeout.connect(self.process_frame)
+
+        self.log_timer = QTimer() # new timer for satabase records
+        self.log_timer.timeout.connect(self.log_data_to_db)
+
         self.frame_count = 0
         self.start_time = time.time()
         self.last_plot_update = 0
@@ -45,6 +50,9 @@ class TrafficApp:
         self.frame_counter = 0
         self.density_history = deque(maxlen=100)
         self.avg_density = 0
+        self.last_processed_vehicle_count = 0
+        self.last_processed_density_label = "N/A"
+        self.last_processed_density_percentage = 0.0
 
         # Create directories if needed
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -69,9 +77,9 @@ class TrafficApp:
         for name, path in MODEL_PATHS.items():
             if os.path.exists(path):
                 self.available_models[name] = path
-        
+
         if not self.available_models:
-            QMessageBox.critical(self.ui, "Error", 
+            QMessageBox.critical(self.ui, "Error",
                                 "No model files found in the models directory!")
             self.ui.model_combo.setEnabled(False)
             self.ui.start_button.setEnabled(False)
@@ -79,26 +87,19 @@ class TrafficApp:
             self.ui.model_combo.clear()
             self.ui.model_combo.addItems(self.available_models.keys())
             self.change_model()  # Load initial model
-        
+
         self.density_canvas = DensityPlotCanvas()
         self.ui.graph_layout.addWidget(self.density_canvas)
 
-        try:
-            self.log_file = open("traffic_density_log.txt", "w")
-            self.log_file.write("Traffic Density Monitoring Log\n")
-            self.log_file.write("="*50 + "\n")
-        except Exception as e:
-            print(f"Log file creation failed: {e}")
-            self.log_file = None
 
     def change_model(self):
         model_name = self.ui.model_combo.currentText()
         model_path = self.available_models.get(model_name)
-        
+
         if not model_path or not os.path.exists(model_path):
             self.ui.status_label.setText(f"Model file not found: {model_name}")
             return
-            
+
         try:
             self.model = YOLO(model_path)
             self.ui.status_label.setText(f"Model loaded: {model_name}")
@@ -108,10 +109,11 @@ class TrafficApp:
             print(f"Error loading model: {e}")
 
     def cleanup_resources(self):
-        if self.log_file:
-            self.log_file.close()
         if self.cap and self.cap.isOpened():
             self.cap.release()
+
+        if self.db_manager:
+            self.db_manager.close()
 
     def __del__(self):
         self.cleanup_resources()
@@ -120,13 +122,13 @@ class TrafficApp:
         video_path = self.ui.path_input.text().strip() or DEFAULT_VIDEO
 
         if not os.path.exists(video_path):
-            QMessageBox.warning(self.ui, "File Not Found", 
+            QMessageBox.warning(self.ui, "File Not Found",
                                f"Video file not found:\n{video_path}")
             return
 
         self.cap = cv2.VideoCapture(video_path)
         if not self.cap.isOpened():
-            QMessageBox.critical(self.ui, "Error", 
+            QMessageBox.critical(self.ui, "Error",
                                 "Failed to open video file")
             return
 
@@ -134,7 +136,7 @@ class TrafficApp:
         width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = self.cap.get(cv2.CAP_PROP_FPS)
-        
+
         self.ui.video_info.setText(
             f"Resolution: {width}x{height} | FPS: {fps:.1f} | Model: {self.ui.model_combo.currentText()}"
         )
@@ -145,30 +147,50 @@ class TrafficApp:
         self.last_fps_time = self.start_time
         self.frame_counter = 0
         self.timer.start(30)  # ~33 FPS
+        self.log_timer.start(1000)
         self.ui.status_label.setText("Processing video...")
 
     def stop_video(self):
         if self.cap and self.cap.isOpened():
             self.timer.stop()
+            self.log_timer.stop()
             self.cap.release()
             self.ui.status_label.setText("Video stopped")
             print("Video stopped")
         else:
             self.ui.status_label.setText("No active video")
 
+    # new method added for database
+    def log_data_to_db(self):
+        if self.db_manager.conn:
+            density_label, _, adjusted = self.classify_density(
+                self.avg_density)
+            vehicle_count = self.frame_count
+
+            current_vehicle_count = getattr(self, 'last_processed_vehicle_count', 0)
+
+            self.db_manager.insert_log(
+                density_label=density_label,
+                density_percentage=adjusted,
+                vehicle_count=current_vehicle_count,
+                fps=self.fps
+            )
+            print(
+                "***Logged***")
+
     def save_snapshot(self):
         if self.current_frame is None:
-            QMessageBox.warning(self.ui, "No Frame", 
+            QMessageBox.warning(self.ui, "No Frame",
                                "No frame available to save")
             return
-            
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = os.path.join(SCREENSHOT_DIR, f"snapshot_{timestamp}.jpg")
-        
+
         # Convert to BGR format before saving
         save_frame = cv2.cvtColor(self.current_frame, cv2.COLOR_RGB2BGR)
         cv2.imwrite(filename, save_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        
+
         self.ui.status_label.setText(f"Snapshot saved: {filename}")
         print(f"Snapshot saved: {filename}")
 
@@ -211,6 +233,7 @@ class TrafficApp:
 
         # Process frame
         results = self.model.predict(frame, conf=0.1, verbose=False)
+
         boxes = []
         if results and hasattr(results[0], "boxes") and results[0].boxes is not None:
             if hasattr(results[0].boxes, "xyxy") and hasattr(results[0].boxes, "cls"):
@@ -219,30 +242,32 @@ class TrafficApp:
                     if self.model.names[int(cls)] in TARGET_CLASSES
                 ]
 
+        self.last_processed_vehicle_count = len(boxes)
+
         frame_area = frame.shape[0] * frame.shape[1]
         density_percent = self.calculate_area_density(boxes, frame_area)
         self.density_history.append(density_percent)
         self.avg_density = sum(self.density_history) / len(self.density_history)
-        
+
         label, color, adjusted = self.classify_density(density_percent)
 
         # Annotate frame
         annotated = results[0].plot()
         h, w, _ = annotated.shape
-        
+
         # Create info panel
         panel_height = 90
         panel = np.zeros((panel_height, w, 3), dtype=np.uint8)
-        
+
         # Add text info
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(panel, f"Density: {label} ({adjusted:.1f}%)", (20, 30), 
+        cv2.putText(panel, f"Density: {label} ({adjusted:.1f}%)", (20, 30),
                     font, 0.9, color, 2)
-        cv2.putText(panel, f"FPS: {self.fps:.1f} | Vehicles: {len(boxes)}", (20, 65), 
+        cv2.putText(panel, f"FPS: {self.fps:.1f} | Vehicles: {len(boxes)}", (20, 65),
                     font, 0.7, (220, 220, 220), 1)
-        cv2.putText(panel, f"Avg: {self.avg_density:.1f}%", (w - 200, 65), 
+        cv2.putText(panel, f"Avg: {self.avg_density:.1f}%", (w - 200, 65),
                     font, 0.7, (180, 180, 255), 1)
-        
+
         # Add density bar
         bar_x, bar_y = 20, panel_height - 25
         bar_width = w - 40
@@ -251,10 +276,10 @@ class TrafficApp:
                       (100, 100, 100), 1)
         cv2.rectangle(panel, (bar_x, bar_y), (bar_x + fill, bar_y + 12),
                       color, -1)
-        
+
         # Combine panel with frame
         combined = np.vstack([annotated, panel])
-        
+
         # Store current frame
         self.current_frame = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
         self.ui.update_image(combined)
@@ -262,14 +287,6 @@ class TrafficApp:
         # Update plot
         elapsed_time = current_time - self.start_time
         self.density_canvas.update_plot(elapsed_time, adjusted)
-
-        # Log every 1 second
-        if elapsed_time - self.last_plot_update >= 1.0:
-            timestamp = time.strftime("%H:%M:%S")
-            if self.log_file:
-                self.log_file.write(f"[{timestamp}] Density: {label} - {adjusted:.1f}%\n")
-                self.log_file.flush()
-            self.last_plot_update = elapsed_time
 
     def run(self):
         sys.exit(self.app.exec_())
