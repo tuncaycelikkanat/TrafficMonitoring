@@ -55,15 +55,20 @@ class DatabaseManager:
         except sqlite3.Error as e:
             print(f"Insert error: {e} (Debug)")
 
-    def get_logs(self, limit=100):
+    def get_logs_by_time_range(self, start_datetime_str, end_datetime_str):
         if not self.conn:
-            print("Cannot retrieve logs.")
+            print("Database connection not established.")
             return []
         try:
-            self.cursor.execute('SELECT * FROM traffic_logs ORDER BY timestamp DESC LIMIT ?;', (limit,))
+            self.cursor.execute('''
+                SELECT id, timestamp, density_label, density_percentage, vehicle_count, fps
+                FROM traffic_logs
+                WHERE STRFTIME('%Y-%m-%d %H:%M', timestamp) BETWEEN STRFTIME('%Y-%m-%d %H:%M', ?) AND STRFTIME('%Y-%m-%d %H:%M', ?)
+                ORDER BY timestamp ASC
+            ''', (start_datetime_str, end_datetime_str))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
-            print(f"Error fetching logs: {e}")
+            print(f"Error fetching logs by time range: {e}")
             return []
 
     def close(self):

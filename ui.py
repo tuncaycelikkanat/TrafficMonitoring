@@ -110,6 +110,20 @@ class TrafficUI(QWidget):
                 background-color: #1E90FF;
             }
         """)
+
+        self.view_logs_button = QPushButton("VIEW LOGS")
+        self.view_logs_button.setFont(button_font)
+        self.view_logs_button.setFixedSize(120, 35)
+        self.view_logs_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #8A2BE2; /* BlueViolet */
+                        color: white;
+                        border-radius: 5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #6A0DAD; /* Darker BlueViolet */
+                    }
+                """)
         
         # Add widgets to control layout
         control_layout.addWidget(model_label)
@@ -121,6 +135,7 @@ class TrafficUI(QWidget):
         control_layout.addWidget(self.start_button)
         control_layout.addWidget(self.stop_button)
         control_layout.addWidget(self.save_button)
+        control_layout.addWidget(self.view_logs_button)
         control_layout.addSpacing(10)
         control_layout.addWidget(self.status_label)
         control_layout.addStretch()
