@@ -11,6 +11,7 @@ from ultralytics import YOLO
 from ui import TrafficUI
 from plot import DensityPlotCanvas
 from database_manager import DatabaseManager
+from data_viewer import DataViewerDialog
 
 # Define relative paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +54,7 @@ class TrafficApp:
         self.last_processed_vehicle_count = 0
         self.last_processed_density_label = "N/A"
         self.last_processed_density_percentage = 0.0
+        self.log_viewer_dialog = None
 
         # Create directories if needed
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -70,6 +72,7 @@ class TrafficApp:
         self.ui.stop_button.clicked.connect(self.stop_video)
         self.ui.save_button.clicked.connect(self.save_snapshot)
         self.ui.model_combo.currentIndexChanged.connect(self.change_model)
+        self.ui.view_logs_button.clicked.connect(self.show_log_viewer)
 
     def initialize_system(self):
         # Check if models exist
@@ -90,6 +93,7 @@ class TrafficApp:
 
         self.density_canvas = DensityPlotCanvas()
         self.ui.graph_layout.addWidget(self.density_canvas)
+        self.app.aboutToQuit.connect(self.cleanup_resources)
 
 
     def change_model(self):
@@ -165,16 +169,20 @@ class TrafficApp:
         if self.db_manager.conn:
             density_label, _, adjusted = self.classify_density(
                 self.avg_density)
-            vehicle_count = self.frame_count
+            #vehicle_count = self.frame_count
 
             current_vehicle_count = getattr(self, 'last_processed_vehicle_count', 0)
 
+            formatted_density_percentage = f"{adjusted:.2f}"
+            formatted_fps = f"{self.fps:.2f}"
+
             self.db_manager.insert_log(
                 density_label=density_label,
-                density_percentage=adjusted,
+                density_percentage=formatted_density_percentage,
                 vehicle_count=current_vehicle_count,
-                fps=self.fps
+                fps=formatted_fps
             )
+
             print(
                 "***Logged***")
 
@@ -287,6 +295,10 @@ class TrafficApp:
         # Update plot
         elapsed_time = current_time - self.start_time
         self.density_canvas.update_plot(elapsed_time, adjusted)
+
+    def show_log_viewer(self):
+        self.log_viewer_dialog = DataViewerDialog(self.ui)
+        self.log_viewer_dialog.show()
 
     def run(self):
         sys.exit(self.app.exec_())
